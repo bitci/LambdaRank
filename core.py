@@ -1,29 +1,73 @@
-from config import K, J, THETA
+from config import Config
 import numpy as np
 from cmath import e
+from utils import show_status
 
 # parameters
 class LRError(Exception):
     pass
 
-class Data(object):
-    W = np.random.rand(J)       # rand 0-1 w_i
-    W_ = np.random.rand(J, K)   # rand 0-1 w_jk
-    B_ = np.random.rand(J)      # rand 0-1 b_j
+class DataSpace(object):
+    B = 0.5                     # rand b #TODO single?
+    C = 0.5                     # rand 0-1 b_j
+    W = np.random.rand(Config.J)       # rand 0-1 w_i
+    W_ = np.random.rand(Config.J, Config.K)   # rand 0-1 w_jk
 
-    B = 1                       # rand b #TODO single?
+    def tofile(self, path):
+        """
+        put model parameters to file
+        """
+        show_status(".. put parameters to file: %s" % path)
 
-def D(X):
-    """
-    \sum_j{w_j f_j(J(X)) + b}
-    """
-    return sum([Data.W[j] * f_(j, X) for j in J]) + Data.B
+        with open(path, 'w') as f:
+            tem = []
+            # input config K, J
+            tem.append(' '.join([str(i) 
+                for i in (Config.K, Config.J)]))
+            # input config THETA SIGMA
+            tem.append(' '.join([str(i) 
+                for i in (Config.THETA, Config.SIGMA)]))
+
+            # input parameters
+            # input a line of B, C
+            tem.append(' '.join([str(i) 
+                for i in (self.B, self.C)]))
+            # input a line of Ws
+            tem.append(' '.join([str(i) for i in self.W]))
+            # input K lines of W_s
+            for j in range(Config.J):
+                tem.append(' '.join([str(i) for i in self.W_[j]]))
+            f.write('\n'.join(tem))
+
+    def fromfile(self, path):
+        show_status(".. load parameters from file : %s" % path)
+        def split_line_trans_type(line, _type):
+            return [_type(i) for i in line.split()]
+
+        with open(path) as f:
+            for no, line in enumerate(f.readlines()):
+                if no == 0:
+                    Config.K, Config.J = split_line_trans_type(line, int)
+                elif no == 1:
+                    Config.THETA, Config.SIGMA = split_line_trans_type(line, float)
+                elif no == 2:
+                    self.B, self.C = split_line_trans_type(line, float)
+                elif no == 3:
+                    Ws = split_line_trans_type(line, float)
+                    for i in range(Config.J):
+                        self.W[i] = Ws[i]
+                else:
+                    j = no - 3
+                    w_j = split_line_trans_type(line, float)
+                    for k in range(Config.K):
+                        self.W_[j][k] = w_j[k]
+
 
 def J(X, j):
     """
     \sum_k{w_{jk}x_{(k)} + b_j}
     """
-    return sum([Data.W_[j][k] * X[k] for k in range(K)]) + Data.B_[j]
+    return sum([DataSpace.W_[j][k] * X[k] for k in range(Config.K)]) + DataSpace.B_[j]
 
 def f(x):
     """
@@ -38,30 +82,30 @@ def f_(j, X):
     """
     return f(J(X, j))
 
-def s_(self, X):
+def s(X):
     """
-    cal score for featrue: X
-    S(x)
+    \sum_j{w_j f_j(J(X)) + b}
     """
-    return f( sum(
-            [Data.W[j] * f_(j, X) for j in range(J)]) 
-        + Data.B)
+    return sum([DataSpace.W[j] * f_(j, X) for j in J]) + DataSpace.B
 
-def diff_L(X1, X2):
+def diff_L(X1, X2, S1=None, S2=None):
     """
     cal L'
     """
-    return - (e**(-(s_(X1) - s_(X2))
-                  /(1 + e**(s_(X1) - s_(X2)))))
+    S1 = s(X1) if not S1 else S1
+    S2 = s(X2) if not S2 else S2
+    return - Config.SIGMA / (
+            1 + e ^ (Config.SIGMA * (S1 - S2))
+        )
 
-def diff_f(X):
+def diff_f(j, X, JX=None):
     """
     cal 
     \partial{f(D)}
     --------------
     \partial{D}
     """
-    _D = D(X)
+    _D = J(X, j) if not JX else JX
     return e^(-_D) / (1+e^(-_D))^2
 
 
@@ -71,6 +115,8 @@ class LambdaRank(object):
         init pair (X1, X2)
         """
         self.X1, self.X2 = X1, X2
+        self.S1, self.S2 = s(self.X1), s(self.X2)
+        self.diff_L = diff_L(None, None, self.S1, self.S2)
 
     def diff_L_b(self):
         """
@@ -79,8 +125,11 @@ class LambdaRank(object):
         \partial b
         """
         res = \
-            diff_L(self.X1, self.X2) * \
-                (diff_f(self.X1) - diff_f(self.X2))
+            self.diff_L * \
+                (
+                    sum([DataSpace.W[j] * diff_f(None, J(self.X1, j)) for j in range(J)])
+                    - 
+                    sum([DataSpace.W[j] * diff_f(None, J(self.X2, j)) for j in range(J)]))
         return res
 
     def diff_L_w_(self, j):
@@ -89,17 +138,9 @@ class LambdaRank(object):
         -----------
         \partial w_j
         """
-        tem = diff_f(self.X1) * f_(j, self.X1) - diff_L(self.X2) * f_(j, self.X2)
-        return diff_L(self.X1, self.X2) * tem
+        return self.diff_L *\
+                (f_(j, self.X1) - f_(j, self.X2))
 
-    def diff_L_b_(self, j):
-        """
-        \partial L
-        -------------
-        \partial bj
-        """
-        return diff_L(self.X1, self.X2) * \
-            (diff_f(self.X1) - diff_f(self.X2))
 
     def diff_L_w__(self, j, k):
         """
@@ -107,27 +148,25 @@ class LambdaRank(object):
         -----------
         \partial W_jk
         """
-        tem = diff_f(self.X1) * self.X1[k] \
-                - diff_f(self.X2) * self.X2[k]
-        return diff_L(self.X1, self.X2) * tem
-
-
+        return self.diff_L * DataSpace.W[j] * (
+                    diff_f(j, self.X1) * self.X1[k]
+                    -
+                    diff_f(j, self.X2) * self.X2[k]
+                )
     # ---------------updater ----------
     def update_w_(self, j):
         """
         update w_k
         """
-        Data.W[j] = Data.W[j] - THETA * self.diff_L_w_(j)
+        DataSpace.W[j] = DataSpace.W[j] - Config.THETA * self.diff_L_w_(j)
 
     def update_w__(self, j, k):
-        Data.W[j][k] = Data.W[j][k] - THETA * self.diff_L_w__(j, k)
+        DataSpace.W[j][k] = DataSpace.W[j][k] - Config.THETA * self.diff_L_w__(j, k)
 
     def update_b(self):
-        Data.B = Data.B - THETA * self.diff_L_b()
+        DataSpace.B = DataSpace.B - Config.THETA * self.diff_L_b()
 
-    def update_b_(self, j):
-        Data.B_[j] = Data.B_[j] - THETA * self.diff_L_b_(j)
-
+    # ----------------API---------------
     def study_line(self, X1, X2):
         """
         study from a line of record from trainset
@@ -135,13 +174,14 @@ class LambdaRank(object):
         self.init(X1, X2)
         for j in range(J):
             self.update_w_(j)
-            self.update_b()
             self.update_b_(j)
-            for k in range(K):
+
+        for j in range(J):
+            for k in range(Config.K):
                 self.update_w__(j, k)
 
     def predict(self, X):
-        return s_(X)
+        return s(X)
 
 
 if __name__ == '__main__':

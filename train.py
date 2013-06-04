@@ -4,8 +4,16 @@ process:
     train the model
     predict scores for each test record and output the order
 """
+import random
+import numpy as np
+
 from core import LambdaRank 
-from config import TRAINSET_PAIR_PATH, TRAINSET_USER_FEATURE_PATH_, TRAINSET_ITEM_FEATURE_PATH
+from config import (TRAINSET_PAIR_PATH, 
+        TRAINSET_USER_FEATURE_PATH_, 
+        TRAINSET_ITEM_FEATURE_PATH,
+        TRAIN_SET_NUM,
+        )
+from utils import show_status
 
 class DataInputer(object):
     """
@@ -32,7 +40,27 @@ class DataInputer(object):
         self.item_features = {}
         self.pairs = []
 
+    def __call__(self):
+        self.input_user_features()
+        self.input_item_features()
+        self.input_pair_features()
+        self.split_dataset()
+
+    def get_dataset(self, i):
+        """
+        iter to yield data
+
+        ("userfeature positive-record-features" ,
+            "userfeature negtive-record-features")
+        """
+        for pair in self.data_sets[i]:
+            userid, pid, nid = [int(p) for p in pair.split()]
+            record = (' '.join(self.user_features[userid], self.item_features[pid]), 
+            ' '.join(self.user_features[userid], self.item_features[nid]))
+            yield record
+
     def input_user_features(self):
+        show_status(".. input user features")
         with open(TRAINSET_USER_FEATURE_PATH_) as f:
             for line in f.readlines():
                 ws = line.split()
@@ -41,6 +69,7 @@ class DataInputer(object):
                 self.item_features[userid] = ' '.join(features)
 
     def input_item_features(self):
+        show_status(".. input item features")
         with open(TRAINSET_ITEM_FEATURE_PATH) as f:
             for line in f.readlines():
                 ws = line.split()
@@ -49,24 +78,25 @@ class DataInputer(object):
                 self.item_features[itemid] = ' '.join(features)
 
     def input_pair_features(self):
+        show_status(".. input pairs features")
         with open(TRAINSET_PAIR_PATH) as f:
             for line in f.readlines():
-                # TODO to randomly order it?
                 self.pairs.append(line)
+            show_status(".. random shuffle pairs")
+            random.shuffle(self.pairs)
 
-    @property
-    def data(self):
+    def split_dataset(self):
         """
-        iter to yield data
+        spit dataset to several splits
+        and create a validation dataset
+        """
+        show_status(".. split dataset to %d pieces" % TRAIN_SET_NUM)
+        num = len(self.pairs)
+        piece_len = int(TRAIN_SET_NUM / num)
+        index = 0
+        self.data_sets = [ self.pairs[index : index + piece_len] for i in xrange(TRAIN_SET_NUM)]
+        del self.pairs
 
-        ("userfeature positive-record-features" ,
-            "userfeature negtive-record-features")
-        """
-        for pair in self.pairs:
-            userid, pid, nid = [int(p) for p in pair.split()]
-            record = (' '.join(self.user_features[userid], self.item_features[pid]), 
-            ' '.join(self.user_features[userid], self.item_features[nid]))
-            yield record
 
 
 class Trainer(object):
@@ -81,7 +111,20 @@ class Trainer(object):
         """
         record is a string line
         """
-        for i, (X1, X2) in enumerate(self.dataset.data):
-            X1 = X1.split()
-            X2 = X2.split()
-            self.model.study_line(X1, X2)
+        for val_idx in xrange(TRAIN_SET_NUM):
+            # user ith dataset as a validate dataset
+            set_indexs = set(range(TRAIN_SET_NUM))
+            set_indexs.discard(val_idx)
+
+            # train using the rest dataset
+            for i in list(set_indexs):
+                for i, (X1, X2) in enumerate(self.dataset.get_dataset(1)): 
+                    X1 = np.array([float(i) for i in X1.split()])
+                    X2 = np.array([float(i) for i in X2.split()])
+                    self.model.study_line(X1, X2)
+
+    def validate(self, val_set):
+        """
+        validate and save best MAP
+        """
+        pass
