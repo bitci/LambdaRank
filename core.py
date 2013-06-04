@@ -8,10 +8,11 @@ class LRError(Exception):
     pass
 
 class DataSpace(object):
-    B = 0.5                     # rand b #TODO single?
-    C = 0.5                     # rand 0-1 b_j
-    W = np.random.rand(Config.J)       # rand 0-1 w_i
-    W_ = np.random.rand(Config.J, Config.K)   # rand 0-1 w_jk
+    def __init__(self):
+        self.B = 0.5                     # rand b #TODO single?
+        self.C = 0.5                     # rand 0-1 b_j
+        self.W = np.random.rand(Config.J)       # rand 0-1 w_i
+        self.W_ = np.random.rand(Config.J, Config.K)   # rand 0-1 w_jk
 
     def tofile(self, path):
         """
@@ -63,60 +64,17 @@ class DataSpace(object):
                         self.W_[j][k] = w_j[k]
 
 
-def J(X, j):
-    """
-    \sum_k{w_{jk}x_{(k)} + b_j}
-    """
-    return sum([DataSpace.W_[j][k] * X[k] for k in range(Config.K)]) + DataSpace.B_[j]
-
-def f(x):
-    """
-    >>> f(2)
-    0.8807970779778823
-    """
-    return 1/(1+e**(-x))
-
-def f_(j, X):
-    """
-    f_j(X)
-    """
-    return f(J(X, j))
-
-def s(X):
-    """
-    \sum_j{w_j f_j(J(X)) + b}
-    """
-    return sum([DataSpace.W[j] * f_(j, X) for j in J]) + DataSpace.B
-
-def diff_L(X1, X2, S1=None, S2=None):
-    """
-    cal L'
-    """
-    S1 = s(X1) if not S1 else S1
-    S2 = s(X2) if not S2 else S2
-    return - Config.SIGMA / (
-            1 + e ^ (Config.SIGMA * (S1 - S2))
-        )
-
-def diff_f(j, X, JX=None):
-    """
-    cal 
-    \partial{f(D)}
-    --------------
-    \partial{D}
-    """
-    _D = J(X, j) if not JX else JX
-    return e^(-_D) / (1+e^(-_D))^2
-
-
 class LambdaRank(object):
+    def __init__(self):
+        self.dataspace = DataSpace()
+
     def init(self, X1, X2):
         """
         init pair (X1, X2)
         """
         self.X1, self.X2 = X1, X2
-        self.S1, self.S2 = s(self.X1), s(self.X2)
-        self.diff_L = diff_L(None, None, self.S1, self.S2)
+        self.S1, self.S2 = self.s(self.X1), self.s(self.X2)
+        self._diff_L = self.diff_L(None, None, self.S1, self.S2)
 
     def diff_L_b(self):
         """
@@ -125,11 +83,13 @@ class LambdaRank(object):
         \partial b
         """
         res = \
-            self.diff_L * \
+            self._diff_L * \
                 (
-                    sum([DataSpace.W[j] * diff_f(None, J(self.X1, j)) for j in range(J)])
+                    sum([self.dataspace.W[j] * 
+                        self.diff_f(None, self.J(self.X1, j)) for j in range(Config.J)])
                     - 
-                    sum([DataSpace.W[j] * diff_f(None, J(self.X2, j)) for j in range(J)]))
+                    sum([self.dataspace.W[j] * 
+                        self.diff_f(None, self.J(self.X2, j)) for j in range(Config.J)]))
         return res
 
     def diff_L_w_(self, j):
@@ -138,8 +98,8 @@ class LambdaRank(object):
         -----------
         \partial w_j
         """
-        return self.diff_L *\
-                (f_(j, self.X1) - f_(j, self.X2))
+        return self._diff_L *\
+                (self.f_(j, self.X1) - self.f_(j, self.X2))
 
 
     def diff_L_w__(self, j, k):
@@ -148,23 +108,26 @@ class LambdaRank(object):
         -----------
         \partial W_jk
         """
-        return self.diff_L * DataSpace.W[j] * (
-                    diff_f(j, self.X1) * self.X1[k]
+        return self._diff_L * self.dataspace.W[j] * (
+                    self.diff_f(j, self.X1) * self.X1[k]
                     -
-                    diff_f(j, self.X2) * self.X2[k]
+                    self.diff_f(j, self.X2) * self.X2[k]
                 )
     # ---------------updater ----------
     def update_w_(self, j):
         """
         update w_k
         """
-        DataSpace.W[j] = DataSpace.W[j] - Config.THETA * self.diff_L_w_(j)
+        self.dataspace.W[j] = self.dataspace.W[j] - \
+                Config.THETA * self.diff_L_w_(j)
 
     def update_w__(self, j, k):
-        DataSpace.W[j][k] = DataSpace.W[j][k] - Config.THETA * self.diff_L_w__(j, k)
+        self.dataspace.W[j][k] = self.dataspace.W[j][k] - \
+                Config.THETA * self.diff_L_w__(j, k)
 
     def update_b(self):
-        DataSpace.B = DataSpace.B - Config.THETA * self.diff_L_b()
+        self.dataspace.B = self.dataspace.B - \
+                Config.THETA * self.diff_L_b()
 
     # ----------------API---------------
     def study_line(self, X1, X2):
@@ -172,17 +135,65 @@ class LambdaRank(object):
         study from a line of record from trainset
         """
         self.init(X1, X2)
-        for j in range(J):
+        for j in range(Config.J):
             self.update_w_(j)
             self.update_b_(j)
 
-        for j in range(J):
+        for j in range(Config.J):
             for k in range(Config.K):
                 self.update_w__(j, k)
 
     def predict(self, X):
-        return s(X)
+        return self.s(X)
 
+
+    # ----------------private detail functions -----
+    def J(self, X, j):
+        """
+        \sum_k{w_{jk}x_{(k)} + b_j}
+        """
+        return sum([self.dataspace.W_[j][k] * X[k] 
+                for k in range(Config.K)]) + self.dataspace.B_[j]
+
+    def f(x):
+        """
+        >>> f(2)
+        0.8807970779778823
+        """
+        return 1/(1+e**(-x))
+
+    def f_(self, j, X):
+        """
+        f_j(X)
+        """
+        return self.f(self.J(X, j))
+
+    def s(self, X):
+        """
+        \sum_j{w_j f_j(J(X)) + b}
+        """
+        return sum([self.dataspace.W[j] * self.f_(j, X) 
+                    for j in Config.J]) + self.dataspace.B
+
+    def diff_L(self, X1, X2, S1=None, S2=None):
+        """
+        cal L'
+        """
+        S1 = self.s(X1) if not S1 else S1
+        S2 = self.s(X2) if not S2 else S2
+        return - Config.SIGMA / (
+                1 + e ^ (Config.SIGMA * (S1 - S2))
+            )
+
+    def diff_f(self, j, X, JX=None):
+        """
+        cal 
+        \partial{f(D)}
+        --------------
+        \partial{D}
+        """
+        _D = self.J(X, j) if not JX else JX
+        return e^(-_D) / (1+e^(-_D))^2
 
 if __name__ == '__main__':
     import doctest

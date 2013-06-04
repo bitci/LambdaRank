@@ -1,5 +1,8 @@
 from __future__ import division
+import os
 import time
+
+PROJECT_PATH = os.path.dirname(__file__)
 
 def show_status(info, cur=None, total=None):
     """
@@ -32,3 +35,6 @@ def cal_map(key_list, res_list):
             if hit_count == len(key_set):
                 break
     return res / len(key_set)
+
+def data_path(*fname):
+    return os.path.join(PROJECT_PATH, *fname)

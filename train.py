@@ -7,13 +7,13 @@ process:
 import random
 import numpy as np
 
-from core import LambdaRank 
+from core import LambdaRank , DataSpace
 from config import (TRAINSET_PAIR_PATH, 
         TRAINSET_USER_FEATURE_PATH_, 
         TRAINSET_ITEM_FEATURE_PATH,
         TRAIN_SET_NUM,
         )
-from utils import show_status
+from utils import show_status, data_path
 
 class DataInputer(object):
     """
@@ -111,20 +111,29 @@ class Trainer(object):
         """
         record is a string line
         """
+        val_maps = []
         for val_idx in xrange(TRAIN_SET_NUM):
             # user ith dataset as a validate dataset
             set_indexs = set(range(TRAIN_SET_NUM))
             set_indexs.discard(val_idx)
+            self.train(set_indexs)
+            val_res = self.validate()
+            val_maps.append(val_res)
+        map_res = sum(val_maps) / TRAIN_SET_NUM
+        self.model.dataspace.tofile(data_path('models', str(map_res)))
 
-            # train using the rest dataset
-            for i in list(set_indexs):
-                for i, (X1, X2) in enumerate(self.dataset.get_dataset(1)): 
-                    X1 = np.array([float(i) for i in X1.split()])
-                    X2 = np.array([float(i) for i in X2.split()])
-                    self.model.study_line(X1, X2)
+    def train(self, set_indexs):
+        # train using the rest dataset
+        for i in list(set_indexs):
+            for i, (X1, X2) in enumerate(self.dataset.get_dataset(1)): 
+                X1 = np.array([float(i) for i in X1.split()])
+                X2 = np.array([float(i) for i in X2.split()])
+                self.model.study_line(X1, X2)
+
 
     def validate(self, val_set):
         """
         validate and save best MAP
         """
+        # TODO how to validate?
         pass
