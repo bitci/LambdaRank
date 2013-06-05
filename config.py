@@ -5,6 +5,8 @@ TRAINSET_PAIR_PATH = ""
 TRAINSET_USER_FEATURE_PATH_= ""
 TRAINSET_ITEM_FEATURE_PATH = ""
 
+MAX_PAIRS_SINGLE_LINE = 500
+
 class Config(object):
 # total feature num of an item
     K = 200
