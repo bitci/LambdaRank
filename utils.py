@@ -18,7 +18,7 @@ def show_status(info, cur=None, total=None):
     if cur is None:
         print info, _time
         return
-    step = int(total / 10)
+    step = int(total / 100)
     if cur % step == 0:
         status = cur/total
         print info, status, 
@@ -38,3 +38,6 @@ def cal_map(key_list, res_list):
 
 def data_path(*fname):
     return os.path.join(PROJECT_PATH, *fname)
+
+def get_path(fname):
+    return os.path.join(PROJECT_PATH, fname)
